@@ -75,22 +75,22 @@ export default function EnergyInsightsDashboard() {
   };
 
   const generateClaudeInsights = async (electricData, gasData) => {
-  try {
-    const electricSummary = electricData.length > 0 ? {
-      totalKwh: electricData.reduce((sum, d) => sum + d.consumption, 0).toFixed(2),
-      avgDaily: (electricData.reduce((sum, d) => sum + d.consumption, 0) / electricData.length).toFixed(2),
-      maxUsage: Math.max(...electricData.map(d => d.consumption)).toFixed(2),
-      minUsage: Math.min(...electricData.map(d => d.consumption)).toFixed(2)
-    } : null;
-    
-    const gasSummary = gasData.length > 0 ? {
-      totalKwh: gasData.reduce((sum, d) => sum + d.consumption, 0).toFixed(2),
-      avgDaily: (gasData.reduce((sum, d) => sum + d.consumption, 0) / gasData.length).toFixed(2),
-      maxUsage: Math.max(...gasData.map(d => d.consumption)).toFixed(2),
-      minUsage: Math.min(...gasData.map(d => d.consumption)).toFixed(2)
-    } : null;
+    try {
+      const electricSummary = electricData.length > 0 ? {
+        totalKwh: electricData.reduce((sum, d) => sum + d.consumption, 0).toFixed(2),
+        avgDaily: (electricData.reduce((sum, d) => sum + d.consumption, 0) / electricData.length).toFixed(2),
+        maxUsage: Math.max(...electricData.map(d => d.consumption)).toFixed(2),
+        minUsage: Math.min(...electricData.map(d => d.consumption)).toFixed(2)
+      } : null;
 
-    const prompt = `You are an energy efficiency expert analyzing smart meter data from Octopus Energy for a UK household.
+      const gasSummary = gasData.length > 0 ? {
+        totalKwh: gasData.reduce((sum, d) => sum + d.consumption, 0).toFixed(2),
+        avgDaily: (gasData.reduce((sum, d) => sum + d.consumption, 0) / gasData.length).toFixed(2),
+        maxUsage: Math.max(...gasData.map(d => d.consumption)).toFixed(2),
+        minUsage: Math.min(...gasData.map(d => d.consumption)).toFixed(2)
+      } : null;
+
+      const prompt = `You are an energy efficiency expert analyzing smart meter data from Octopus Energy for a UK household.
 
 ${electricSummary ? `Electricity Usage:
 - Total consumption: ${electricSummary.totalKwh} kWh over ${electricData.length} periods
@@ -113,37 +113,61 @@ Provide personalized insights including:
 
 Keep the tone friendly and actionable. Focus on practical tips.`;
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': credentials.openaiApiKey, // We'll rename this field
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1024,
-        messages: [
-          { 
-            role: 'user', 
-            content: prompt 
-          }
-        ]
-      })
-    });
+      // Mask and log key presence (do not log full key)
+      const key = credentials.openaiApiKey;
+      const maskedKey = key ? key.replace(/.(?=.{4})/g, '*') : '<<empty>>';
+      console.log('Anthropic key (masked):', maskedKey);
+      console.log('Prompt length:', prompt.length, 'chars');
 
-    if (!response.ok) {
-      throw new Error('Failed to generate insights. Check your Anthropic API key.');
+      const response = await fetch('/api/anthropic', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // No key sent from the client. The server proxy will attach the Anthropic key.
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1024,
+          messages: [ { role: 'user', content: prompt } ]
+        })
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => '<unreadable body>');
+        console.error('Anthropic API returned non-OK:', response.status, text);
+        throw new Error(`Anthropic API error ${response.status}: ${text}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      let data;
+      if (contentType.includes('application/json')) {
+        data = await response.json();
+        console.log('Anthropic response (json):', data);
+      } else {
+        const text = await response.text();
+        console.log('Anthropic response (text):', text);
+        data = { rawText: text };
+      }
+
+      // Try extracting text safely (log full data above for debugging)
+      let insightText = '';
+      if (data && data.content && Array.isArray(data.content) && data.content[0] && data.content[0].text) {
+        insightText = data.content[0].text;
+      } else if (data && data.choices && data.choices[0] && (data.choices[0].message || data.choices[0].text)) {
+        insightText = data.choices[0].message?.content || data.choices[0].text || JSON.stringify(data.choices[0]);
+      } else if (data.rawText) {
+        insightText = data.rawText;
+      } else {
+        insightText = JSON.stringify(data);
+      }
+
+      console.log('Extracted insight text (first 200 chars):', insightText.slice(0, 200));
+      setInsights(insightText);
+    } catch (err) {
+      console.error('generateClaudeInsights error:', err);
+      setInsights(`Unable to generate AI insights: ${err.message}\n\nMake sure you've added a valid Anthropic API key with available credits. Check browser console (Network tab) for more details.`);
     }
-
-    const data = await response.json();
-    const insightText = data.content[0].text;
-    
-    setInsights(insightText);
-  } catch (err) {
-    setInsights(`Unable to generate AI insights: ${err.message}\n\nMake sure you've added a valid Anthropic API key with available credits.`);
-  }
-};
+  };
 
   const generateOpenAIInsights = async (electricData, gasData) => {
     try {
