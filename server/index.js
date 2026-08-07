@@ -1,52 +1,160 @@
-require('dotenv').config();
+const path = require('node:path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const cors = require('cors');
+const { loadDashboard, UpstreamError } = require('./octopus');
+const { generateInsights } = require('./insights');
 
-const app = express();
+const DEFAULT_ORIGINS = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:5174',
+  'http://127.0.0.1:5174',
+  'http://localhost:4173',
+  'http://127.0.0.1:4173',
+];
 
-// Prefer the global fetch available in Node 18+; otherwise lazily import node-fetch at runtime.
-let fetchFunc = globalThis.fetch;
-if (!fetchFunc) {
-  fetchFunc = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
+function allowedOrigins() {
+  const configured = process.env.ALLOWED_ORIGINS
+    ?.split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  return configured?.length ? configured : DEFAULT_ORIGINS;
 }
 
-// Allow the Vite dev server origin during development
-app.use(cors({ origin: ['http://localhost:5173'] }));
-app.use(express.json({ limit: '1mb' }));
+function createRateLimit({ max, windowMs }) {
+  const requests = new Map();
+  return (req, res, next) => {
+    const now = Date.now();
+    const key = req.ip || req.socket.remoteAddress || 'unknown';
+    const entry = requests.get(key);
 
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || process.env.VITE_ANTHROPIC_API_KEY;
-if (!ANTHROPIC_KEY) {
-  console.warn('Warning: ANTHROPIC_API_KEY not set. Proxy will return 500 for requests.');
+    if (!entry || entry.resetAt <= now) {
+      requests.set(key, { count: 1, resetAt: now + windowMs });
+      next();
+      return;
+    }
+
+    if (entry.count >= max) {
+      res.status(429).json({ error: 'Too many requests. Please wait a moment and try again.' });
+      return;
+    }
+
+    entry.count += 1;
+    next();
+  };
 }
 
-app.post('/api/anthropic', async (req, res) => {
-  try {
-    if (!ANTHROPIC_KEY) return res.status(500).json({ error: 'Anthropic API key not configured on server.' });
-
-    const response = await fetchFunc('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_KEY,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify(req.body)
-    });
-
-    const contentType = response.headers.get('content-type') || 'text/plain';
-    const body = await response.text();
-
-    res.status(response.status).type(contentType).send(body);
-  } catch (err) {
-    console.error('Anthropic proxy error:', err);
-    res.status(500).json({ error: 'Proxy error', message: err.message });
+function cleanAccountNumber(value) {
+  const accountNumber = String(value || process.env.OCTOPUS_ACCOUNT_NUMBER || '')
+    .trim()
+    .toUpperCase();
+  if (!/^A-[A-Z0-9]{6,16}$/.test(accountNumber)) {
+    throw new UpstreamError('Enter a valid Octopus account number, such as A-1234ABCD.', 400);
   }
-});
+  return accountNumber;
+}
 
-// Health check / root route to avoid 404 noise from browsers/extensions
-app.get('/', (req, res) => {
-  res.json({ status: 'ok', message: 'Anthropic proxy is running' });
-});
+function resolveOctopusKey(value) {
+  const apiKey = String(value || process.env.OCTOPUS_API_KEY || '').trim();
+  if (apiKey.length < 10 || apiKey.length > 200) {
+    throw new UpstreamError('Enter a valid Octopus API key.', 400);
+  }
+  return apiKey;
+}
 
-const port = process.env.PORT || 3001;
-app.listen(port, () => console.log(`Anthropic proxy listening on http://localhost:${port}`));
+function createApp({ fetchImpl = globalThis.fetch } = {}) {
+  const app = express();
+  const origins = allowedOrigins();
+
+  app.disable('x-powered-by');
+  app.use(cors({
+    origin(origin, callback) {
+      callback(null, !origin || origins.includes(origin));
+    },
+  }));
+  app.use(express.json({ limit: '100kb' }));
+
+  app.get('/api/health', (_req, res) => {
+    const openAIConfigured = Boolean(process.env.OPENAI_API_KEY);
+    const anthropicConfigured = Boolean(process.env.ANTHROPIC_API_KEY);
+    res.json({
+      status: 'ok',
+      aiAvailable: openAIConfigured || anthropicConfigured,
+      aiProvider: openAIConfigured ? 'openai' : anthropicConfigured ? 'anthropic' : null,
+      aiFallbackAvailable: openAIConfigured && anthropicConfigured,
+      octopusConfigured: Boolean(process.env.OCTOPUS_API_KEY && process.env.OCTOPUS_ACCOUNT_NUMBER),
+    });
+  });
+
+  app.post(
+    '/api/octopus/dashboard',
+    createRateLimit({ max: 20, windowMs: 60_000 }),
+    async (req, res, next) => {
+      try {
+        const days = [7, 14, 30, 60, 90].includes(Number(req.body.days))
+          ? Number(req.body.days)
+          : 14;
+        const result = await loadDashboard({
+          apiKey: resolveOctopusKey(req.body.apiKey),
+          accountNumber: cleanAccountNumber(req.body.accountNumber),
+          days,
+          fetchImpl,
+        });
+        res.json(result);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  app.post(
+    '/api/insights',
+    createRateLimit({ max: 8, windowMs: 60_000 }),
+    async (req, res, next) => {
+      try {
+        const openAIKey = process.env.OPENAI_API_KEY;
+        const anthropicKey = process.env.ANTHROPIC_API_KEY;
+        if (!openAIKey && !anthropicKey) {
+          res.status(503).json({ error: 'AI insights are not configured on this server.' });
+          return;
+        }
+
+        const result = await generateInsights({
+          openAIKey,
+          openAIModel: process.env.OPENAI_MODEL,
+          anthropicKey,
+          anthropicModel: process.env.ANTHROPIC_MODEL,
+          summary: req.body.summary,
+          fetchImpl,
+        });
+        res.json(result);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  app.use((error, _req, res, _next) => {
+    const status = error.status || 500;
+    if (status >= 500) console.error(error.message);
+    res.status(status).json({
+      error: error instanceof UpstreamError
+        ? error.message
+        : status >= 500
+          ? 'The service could not complete that request.'
+          : error.message,
+    });
+  });
+
+  return app;
+}
+
+if (require.main === module) {
+  const port = Number(process.env.PORT) || 3001;
+  createApp().listen(port, () => {
+    console.log(`Energy API listening on http://localhost:${port}`);
+  });
+}
+
+module.exports = { createApp, createRateLimit };

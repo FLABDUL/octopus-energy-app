@@ -1,70 +1,69 @@
-# Smart Energy Insights (React + Vite)
+# Pulse — Octopus Energy insights
 
-This repository is a small React app (Vite) that fetches energy consumption data from Octopus Energy and generates AI-powered insights using Anthropic's Claude models. The project includes a small local proxy to forward AI requests server-side so your API keys remain secret.
+Pulse turns Octopus Energy half-hourly consumption readings into daily trends, time-of-day patterns, tariff-based cost estimates, and optional AI guidance.
 
-**This README explains how to run the app locally (Windows / PowerShell).**
+The app now uses a privacy-first client/server design:
 
-**Prerequisites**
-- **Node 18+**: required for built-in `fetch` in the server. If you use an older Node, you may need to install `node-fetch`.
-- **npm**: included with Node.
+- The browser never calls Octopus, OpenAI, or Anthropic directly.
+- Octopus credentials are held in memory for a request and are not saved to browser storage.
+- The server discovers meter identifiers from the Octopus account endpoint.
+- Only aggregate statistics are sent to the configured AI provider when the optional AI coach is enabled.
+- An interactive demo works without credentials or a backend connection.
 
-**Quick Start (development)**
+## Run locally
 
-- Clone the repo and install root dependencies:
+Prerequisites: Node.js 18 or newer and npm.
 
-	```powershell
-	git clone <repo-url>
-	cd octopus-energy-app
-	npm install
-	```
+```powershell
+npm install
+npm --prefix server install
+npm run dev:all
+```
 
-- Create a frontend environment file at the project root named `.env.local` and add your keys and meter details (do NOT commit this file). Example contents:
+Open `http://localhost:5173`. If that port is occupied, Vite prints the next available port.
 
-	```text
-	VITE_OCTOPUS_API_KEY=sk_live_...
-	VITE_ANTHROPIC_API_KEY=sk-ant-...
-	VITE_ACCOUNT_NUMBER=A-12345678
-	VITE_ELECTRIC_MPAN=1234567890123
-	VITE_ELECTRIC_SERIAL=12A3456789
-	VITE_GAS_MPRN=1234567890
-	VITE_GAS_SERIAL=G4A1234567
-	```
+## Optional server configuration
 
-- **Start both frontend and server with one command (from project root):**
+Copy `server/.env.example` to `server/.env` and fill in any values you want the server to own:
 
-  ```powershell
-  npm install
-  $env:ANTHROPIC_API_KEY='sk-ant-...'; npm run dev:all
-  ```
-  This runs the Vite dev server (port 5173) and Anthropic proxy (port 3001) concurrently.
+```powershell
+Copy-Item server/.env.example server/.env
+```
 
-- **Or, start them separately:**
+- `OCTOPUS_API_KEY` and `OCTOPUS_ACCOUNT_NUMBER` remove the need to enter Octopus credentials in the UI.
+- `OPENAI_API_KEY` enables OpenAI as the primary AI coach provider.
+- `OPENAI_MODEL` selects the server-controlled OpenAI model (the default is the cost-efficient `gpt-5.6-luna`).
+- `ANTHROPIC_API_KEY` is optional. When both keys exist, Anthropic is used automatically if OpenAI fails; without an OpenAI key, it remains the primary provider.
+- `ANTHROPIC_MODEL` selects the server-controlled Anthropic fallback model.
+- `ALLOWED_ORIGINS` controls which browser origins may call the API.
 
-  - Terminal 1 (server proxy):
-    ```powershell
-    cd server
-    npm install
-    # Create server/.env from example (copy and fill in your key)
-    cp .env.example .env
-    # Then start the proxy (it reads ANTHROPIC_API_KEY from server/.env or env var)
-    npm start
-    ```
+Never commit `server/.env`; it is ignored by Git.
 
-  - Terminal 2 (frontend from project root):
-    ```powershell
-    cd ..\
-    npm run dev
-    ```
+## Quality checks
 
-- Open the app at `http://localhost:5173`. The frontend is configured to proxy `/api/*` to `http://localhost:3001` (the local proxy).**Notes & Troubleshooting**
-- Do not commit `.env.local` or `server/.env` — these contain secrets. The repository `.gitignore` already excludes `.env*` files.
-- If you change `.env.local`, restart the Vite dev server so `import.meta.env` picks up the new values.
-- If you see a browser CORS error when calling Anthropic directly, it's expected — Anthropic does not allow arbitrary browser origins. Use the provided server proxy.
-- If the UI shows "Unable to generate AI insights" or a 4xx/5xx error, check:
-	- Browser DevTools → Network for `POST /api/anthropic` and the response body.
-	- The proxy terminal for server logs and errors.
+```powershell
+npm run lint
+npm test
+npm run build
+```
 
-**Security**
-- Keep API keys secret. Use the server proxy or a hosted serverless function for production. Rotate keys if they are accidentally committed.
+## Data notes
 
-If you want, I can add a `server/.env.example` and a root `dev` script to run both proxy + frontend concurrently. Let me know which you'd prefer.
+- Consumption requests use explicit UTC dates, chronological ordering, and pagination.
+- Daily aggregation uses the `Europe/London` time zone.
+- Electricity is displayed in kWh.
+- Octopus notes that gas readings may be kWh for SMETS1 meters or cubic metres for SMETS2 meters, so gas is labelled as “reported units”.
+- Cost estimates use only the unit rate and standing charge entered by the user. Demo rates are illustrative.
+
+## Security notes
+
+The API applies request-size limits, origin checks, basic in-memory rate limiting, input validation, server-controlled AI prompts/model selection, upstream timeouts, and restricted pagination hosts. A public multi-user deployment should additionally add user authentication, durable distributed rate limiting, HTTPS, and a managed secret store.
+
+Pulse is an independent personal project and is not affiliated with Octopus Energy.
+
+## Public demo deployment
+
+The repository includes a Vercel function entrypoint and routing configuration so
+the Vite frontend and Express API deploy together. Do not add `server/.env` or a
+personal AI-provider key to a public demo: the interactive demo and user-supplied
+Octopus connection work without exposing a paid AI account.
