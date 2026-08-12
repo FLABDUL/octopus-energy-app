@@ -30,3 +30,4 @@ dist-ssr
 
 # Server env
 server/.env
+.vercel
