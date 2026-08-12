@@ -47,6 +47,28 @@ npm test
 npm run build
 ```
 
+## Monthly email report
+
+The production deployment can send a private report for the previous complete
+calendar month. The Vercel Cron job runs at 08:00 UTC on the third day of each
+month, compares the report month with the month before, and uses an idempotency
+key to prevent duplicate monthly sends.
+
+Configure these as production-only Vercel environment variables:
+
+- `REPORT_OCTOPUS_API_KEY` and `REPORT_OCTOPUS_ACCOUNT_NUMBER` load the owner's data.
+- `REPORT_OPENAI_API_KEY` enables the aggregate-only AI coach; delivery falls back
+  to deterministic recommendations if OpenAI is unavailable.
+- `RESEND_API_KEY`, `REPORT_TO_EMAIL`, and `REPORT_FROM_EMAIL` configure delivery.
+- `REPORT_UNIT_RATE_PENCE` and `REPORT_STANDING_CHARGE_PENCE` configure the cost estimate.
+- `REPORT_DASHBOARD_URL` links the email back to Pulse.
+- `CRON_SECRET` protects the cron endpoint. Vercel supplies it as a bearer token.
+
+These deliberately use `REPORT_*` names instead of the public dashboard's
+optional variables. That keeps the owner's Octopus and OpenAI credentials
+exclusive to the scheduled workflow. Only aggregate statistics—not credentials,
+account or meter identifiers, or raw readings—are included in the AI prompt.
+
 ## Data notes
 
 - Consumption requests use explicit UTC dates, chronological ordering, and pagination.
@@ -64,6 +86,7 @@ Pulse is an independent personal project and is not affiliated with Octopus Ener
 ## Public demo deployment
 
 The repository includes a Vercel function entrypoint and routing configuration so
-the Vite frontend and Express API deploy together. Do not add `server/.env` or a
-personal AI-provider key to a public demo: the interactive demo and user-supplied
-Octopus connection work without exposing a paid AI account.
+the Vite frontend and Express API deploy together. Do not add `server/.env` or
+the generic `OPENAI_API_KEY` / `OCTOPUS_API_KEY` variables to a public demo: the
+interactive demo and user-supplied Octopus connection work without them. Use the
+dedicated `REPORT_*` variables only for the protected monthly workflow.

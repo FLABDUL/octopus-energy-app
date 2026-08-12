@@ -160,7 +160,7 @@ function mergeIntervals(series) {
   );
 }
 
-async function loadDashboard({ apiKey, accountNumber, days, fetchImpl }) {
+async function loadDashboardRange({ apiKey, accountNumber, periodFrom, periodTo, fetchImpl }) {
   const account = await fetchAccount({ apiKey, accountNumber, fetchImpl });
   const meters = meterRequests(account);
 
@@ -168,14 +168,11 @@ async function loadDashboard({ apiKey, accountNumber, days, fetchImpl }) {
     throw new UpstreamError('No import electricity or gas meters were found on this account.', 404);
   }
 
-  const periodTo = new Date();
-  const periodFrom = new Date(Date.UTC(
-    periodTo.getUTCFullYear(),
-    periodTo.getUTCMonth(),
-    periodTo.getUTCDate() - (days - 1),
-  ));
-  const periodFromIso = periodFrom.toISOString();
-  const periodToIso = periodTo.toISOString();
+  const periodFromIso = new Date(periodFrom).toISOString();
+  const periodToIso = new Date(periodTo).toISOString();
+  if (!(new Date(periodFromIso) < new Date(periodToIso))) {
+    throw new UpstreamError('The requested date range is invalid.', 400);
+  }
 
   const readings = await Promise.all(
     meters.map((meter) =>
@@ -196,7 +193,7 @@ async function loadDashboard({ apiKey, accountNumber, days, fetchImpl }) {
 
   return {
     account,
-    range: { from: periodFromIso, to: periodToIso, days },
+    range: { from: periodFromIso, to: periodToIso },
     meters: meters.map(({ fuel, identifier, serial, tariffCode }) => ({
       fuel,
       identifier: `${identifier.slice(0, 4)}••••${identifier.slice(-3)}`,
@@ -207,12 +204,30 @@ async function loadDashboard({ apiKey, accountNumber, days, fetchImpl }) {
   };
 }
 
+async function loadDashboard({ apiKey, accountNumber, days, fetchImpl }) {
+  const periodTo = new Date();
+  const periodFrom = new Date(Date.UTC(
+    periodTo.getUTCFullYear(),
+    periodTo.getUTCMonth(),
+    periodTo.getUTCDate() - (days - 1),
+  ));
+  const result = await loadDashboardRange({
+    apiKey,
+    accountNumber,
+    periodFrom,
+    periodTo,
+    fetchImpl,
+  });
+  return { ...result, range: { ...result.range, days } };
+}
+
 module.exports = {
   UpstreamError,
   consumptionUrl,
   fetchAccount,
   fetchConsumption,
   loadDashboard,
+  loadDashboardRange,
   mergeIntervals,
   sanitizeAccount,
 };
