@@ -31,3 +31,8 @@ dist-ssr
 # Server env
 server/.env
 .vercel
+.env*
+
+# Tooling installed by Vercel Marketplace integrations
+.agents/
+skills-lock.json

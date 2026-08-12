@@ -4,6 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const { loadDashboard, UpstreamError } = require('./octopus');
 const { generateInsights } = require('./insights');
+const { runMonthlyReport } = require('./monthly-report');
 
 const DEFAULT_ORIGINS = [
   'http://localhost:5173',
@@ -63,7 +64,7 @@ function resolveOctopusKey(value) {
   return apiKey;
 }
 
-function createApp({ fetchImpl = globalThis.fetch } = {}) {
+function createApp({ fetchImpl = globalThis.fetch, runMonthlyReportImpl = runMonthlyReport } = {}) {
   const app = express();
   const origins = allowedOrigins();
 
@@ -84,7 +85,31 @@ function createApp({ fetchImpl = globalThis.fetch } = {}) {
       aiProvider: openAIConfigured ? 'openai' : anthropicConfigured ? 'anthropic' : null,
       aiFallbackAvailable: openAIConfigured && anthropicConfigured,
       octopusConfigured: Boolean(process.env.OCTOPUS_API_KEY && process.env.OCTOPUS_ACCOUNT_NUMBER),
+      monthlyReportConfigured: Boolean(
+        process.env.REPORT_OCTOPUS_API_KEY
+        && process.env.REPORT_OCTOPUS_ACCOUNT_NUMBER
+        && process.env.RESEND_API_KEY
+        && process.env.REPORT_TO_EMAIL,
+      ),
     });
+  });
+
+  app.get('/api/cron/monthly-report', async (req, res, next) => {
+    try {
+      const cronSecret = process.env.CRON_SECRET;
+      if (!cronSecret || req.headers.authorization !== `Bearer ${cronSecret}`) {
+        res.status(401).json({ error: 'Unauthorized.' });
+        return;
+      }
+      const result = await runMonthlyReportImpl({
+        env: process.env,
+        fetchImpl,
+        testMode: req.query.test === '1',
+      });
+      res.json({ ok: true, ...result });
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.post(
