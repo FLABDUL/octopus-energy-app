@@ -1,92 +1,102 @@
-# Pulse — Octopus Energy insights
+# Pulse Energy Dashboard
 
-Pulse turns Octopus Energy half-hourly consumption readings into daily trends, time-of-day patterns, tariff-based cost estimates, and optional AI guidance.
+> **Parked project:** this repository is preserved as a working portfolio and learning reference. It is not under active feature development. See [project status](docs/PROJECT_STATUS.md) before deploying or reviving it.
 
-The app now uses a privacy-first client/server design:
+Pulse is a privacy-conscious React dashboard for exploring Octopus Energy smart-meter data. It discovers the meters on an account, turns half-hourly readings into daily and hourly patterns, estimates electricity cost from user-supplied tariff rates, and can request aggregate-only coaching from OpenAI with an optional Anthropic fallback.
 
-- The browser never calls Octopus, OpenAI, or Anthropic directly.
-- Octopus credentials are held in memory for a request and are not saved to browser storage.
-- The server discovers meter identifiers from the Octopus account endpoint.
-- Only aggregate statistics are sent to the configured AI provider when the optional AI coach is enabled.
-- An interactive demo works without credentials or a backend connection.
+[Open the live demo](https://octopus-energy-app-psi.vercel.app) · [Read the user guide](docs/USER_GUIDE.md) · [Explore the architecture](docs/ARCHITECTURE.md)
 
-## Run locally
+![Pulse dashboard showing electricity consumption charts and summary cards](docs/images/dashboard-demo.png)
 
-Prerequisites: Node.js 18 or newer and npm.
+## What the project demonstrates
+
+- a credential-free interactive demo with generated electricity and gas readings;
+- live Octopus account and consumption retrieval through a server-side proxy;
+- London-time daily aggregation and a 24-hour usage profile;
+- electricity cost estimates using rates supplied in the browser;
+- deterministic local insights plus optional aggregate-only AI coaching;
+- OpenAI as the primary AI provider with Anthropic fallback;
+- a private monthly Vercel Cron job that emails the owner through Resend;
+- input validation, origin controls, request timeouts, trusted pagination and bounded in-memory rate limiting.
+
+The project is independent and is not affiliated with Octopus Energy.
+
+## How it fits together
+
+```mermaid
+flowchart LR
+    User[Browser user] --> UI[React and Vite dashboard]
+    UI --> API[Express API on Vercel]
+    API --> Octopus[Octopus Energy REST API]
+    UI -->|aggregate summary only| API
+    API --> OpenAI[OpenAI Responses API]
+    API -. optional fallback .-> Anthropic[Anthropic Messages API]
+
+    Cron[Vercel Cron] --> Report[Monthly report pipeline]
+    Report --> Octopus
+    Report -->|aggregate summary only| OpenAI
+    Report --> Resend[Resend email API]
+    Resend --> Owner[Owner inbox]
+```
+
+The browser never calls Octopus or an AI provider directly. Interactive credentials are held in React state, sent to this app's API for the request and not written to browser storage by the application. The monthly job uses separate server-only environment variables. See [Architecture](docs/ARCHITECTURE.md) for the full request sequences and trust boundaries.
+
+## Try it safely
+
+The fastest route is **View the interactive demo** on the landing page. It needs no account, API key or backend integration and supports the same range, fuel, chart, tariff and local-insight controls as live mode.
+
+Live mode requires an Octopus Energy account number and API key. Octopus documents the account and consumption endpoints in its [official REST API guide](https://developer.octopus.energy/guides/rest/api-endpoints/). Never commit an API key or paste it into a deployment you do not control.
+
+For detailed steps, tariff guidance and troubleshooting, use the [User guide](docs/USER_GUIDE.md).
+
+## Local development
+
+Requirements:
+
+- Node.js compatible with the checked-in Vite and package lock;
+- npm;
+- optional Octopus, OpenAI, Anthropic and Resend credentials for integration testing.
 
 ```powershell
+git clone https://github.com/FLABDUL/octopus-energy-app.git
+cd octopus-energy-app
 npm install
 npm --prefix server install
+Copy-Item server\.env.example server\.env
 npm run dev:all
 ```
 
-Open `http://localhost:5173`. If that port is occupied, Vite prints the next available port.
+Open the URL printed by Vite, normally `http://localhost:5173`. The demo works with an empty `server/.env`.
 
-## Optional server configuration
-
-Copy `server/.env.example` to `server/.env` and fill in any values you want the server to own:
+Quality checks:
 
 ```powershell
-Copy-Item server/.env.example server/.env
-```
-
-- `OCTOPUS_API_KEY` and `OCTOPUS_ACCOUNT_NUMBER` remove the need to enter Octopus credentials in the UI.
-- `OPENAI_API_KEY` enables OpenAI as the primary AI coach provider.
-- `OPENAI_MODEL` selects the server-controlled OpenAI model (the default is the cost-efficient `gpt-5.6-luna`).
-- `ANTHROPIC_API_KEY` is optional. When both keys exist, Anthropic is used automatically if OpenAI fails; without an OpenAI key, it remains the primary provider.
-- `ANTHROPIC_MODEL` selects the server-controlled Anthropic fallback model.
-- `ALLOWED_ORIGINS` controls which browser origins may call the API.
-
-Never commit `server/.env`; it is ignored by Git.
-
-## Quality checks
-
-```powershell
-npm run lint
 npm test
+npm run lint
 npm run build
 ```
 
-## Monthly email report
+Do not run the monthly endpoint against real credentials merely to test the UI: it can send an email. The development guide explains dependency injection used by the automated tests and the guarded test-mode endpoint.
 
-The production deployment can send a private report for the previous complete
-calendar month. The Vercel Cron job runs at 08:00 UTC on the third day of each
-month, compares the report month with the month before, and uses an idempotency
-key to prevent duplicate monthly sends.
+## Documentation
 
-Configure these as production-only Vercel environment variables:
+| Guide | Purpose |
+| --- | --- |
+| [User guide](docs/USER_GUIDE.md) | Demo and live-account usage, tariff inputs, AI coaching and troubleshooting |
+| [Architecture](docs/ARCHITECTURE.md) | Components, data flows, privacy boundaries and design decisions |
+| [Development](docs/DEVELOPMENT.md) | Setup, environment variables, endpoints, testing and deployment |
+| [Project status](docs/PROJECT_STATUS.md) | Archived scope, known limitations, maintenance risks and revival checklist |
 
-- `REPORT_OCTOPUS_API_KEY` and `REPORT_OCTOPUS_ACCOUNT_NUMBER` load the owner's data.
-- `REPORT_OPENAI_API_KEY` enables the aggregate-only AI coach; delivery falls back
-  to deterministic recommendations if OpenAI is unavailable.
-- `RESEND_API_KEY`, `REPORT_TO_EMAIL`, and `REPORT_FROM_EMAIL` configure delivery.
-- `REPORT_UNIT_RATE_PENCE` and `REPORT_STANDING_CHARGE_PENCE` configure the cost estimate.
-- `REPORT_DASHBOARD_URL` links the email back to Pulse.
-- `CRON_SECRET` protects the cron endpoint. Vercel supplies it as a bearer token.
+## Important limitations
 
-These deliberately use `REPORT_*` names instead of the public dashboard's
-optional variables. That keeps the owner's Octopus and OpenAI credentials
-exclusive to the scheduled workflow. Only aggregate statistics—not credentials,
-account or meter identifiers, or raw readings—are included in the AI prompt.
+- This is a personal analytics tool, not a billing system. Cost values are estimates and should be checked against an Octopus bill.
+- Cost estimation covers electricity only. Gas is displayed in the units returned by Octopus because gas representation can vary by meter generation.
+- Missing smart-meter readings cannot be repaired by the app. Gas may be absent when Octopus has not exposed readings for the meter.
+- The dashboard does not forecast bills, calculate time-of-use tariff prices or control devices.
+- A public deployment has no user authentication. Do **not** expose owner dashboard credentials through `OCTOPUS_API_KEY` and `OCTOPUS_ACCOUNT_NUMBER` without adding access control.
+- A configured interactive AI key can incur provider cost for public visitors. The existing in-memory limiter is not a substitute for authentication or distributed rate limiting.
+- Dependency and model versions are a preserved 2026 snapshot. Verify provider APIs and supported model identifiers before reviving the project.
 
-## Data notes
+## Licence
 
-- Consumption requests use explicit UTC dates, chronological ordering, and pagination.
-- Daily aggregation uses the `Europe/London` time zone.
-- Electricity is displayed in kWh.
-- Octopus notes that gas readings may be kWh for SMETS1 meters or cubic metres for SMETS2 meters, so gas is labelled as “reported units”.
-- Cost estimates use only the unit rate and standing charge entered by the user. Demo rates are illustrative.
-
-## Security notes
-
-The API applies request-size limits, origin checks, basic in-memory rate limiting, input validation, server-controlled AI prompts/model selection, upstream timeouts, and restricted pagination hosts. A public multi-user deployment should additionally add user authentication, durable distributed rate limiting, HTTPS, and a managed secret store.
-
-Pulse is an independent personal project and is not affiliated with Octopus Energy.
-
-## Public demo deployment
-
-The repository includes a Vercel function entrypoint and routing configuration so
-the Vite frontend and Express API deploy together. Do not add `server/.env` or
-the generic `OPENAI_API_KEY` / `OCTOPUS_API_KEY` variables to a public demo: the
-interactive demo and user-supplied Octopus connection work without them. Use the
-dedicated `REPORT_*` variables only for the protected monthly workflow.
+Released under the [MIT Licence](LICENSE). Octopus Energy, OpenAI, Anthropic, Resend and Vercel names and services remain subject to their own terms.
