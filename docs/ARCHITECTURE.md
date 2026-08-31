@@ -48,7 +48,7 @@ sequenceDiagram
     API->>API: Validate fields and apply rate limit
     API->>OE: GET account with Basic authentication
     OE-->>API: Properties, agreements and meters
-    API->>API: Keep import electricity and gas meters; remove addresses
+    API->>API: Keep import electricity and gas meters and remove addresses
     loop Up to eight meters and twenty pages each
         API->>OE: GET consumption with explicit UTC range
         OE-->>API: Chronological intervals and next page
