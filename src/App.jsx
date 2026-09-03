@@ -356,13 +356,6 @@ function Dashboard({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState('');
 
-  useEffect(() => {
-    setAiText('');
-    setAiProvider('');
-    setAiFallbackUsed(false);
-    setAiError('');
-  }, [activeFuel, dashboard.range.from]);
-
   const requestAiInsight = async () => {
     setAiLoading(true);
     setAiError('');
@@ -763,6 +756,7 @@ export default function App() {
 
   return (
     <Dashboard
+      key={`${activeFuel}-${dashboard.range.from}`}
       dashboard={dashboard}
       days={days}
       activeFuel={activeFuel}
