@@ -140,6 +140,30 @@ The Node test suite covers London-time aggregation, demo series, account sanitis
 
 For an end-to-end UI check, start `npm run dev:all`, open the demo, change fuel and history range, edit the electricity rate, return to the connection view, and check browser console and network errors. Avoid live credentials for routine regression testing.
 
+The repeatable credential-free browser check is:
+
+```powershell
+npx playwright install chromium
+npm run test:smoke
+```
+
+It starts isolated local servers, exercises the demo, verifies the safe health
+response and confirms that the monthly endpoint rejects an unauthorised request.
+It never supplies provider credentials or sends an email.
+
+## Automated maintenance
+
+- Dependabot checks the root and `server` npm locks weekly and GitHub Actions monthly.
+- Patch updates can auto-merge after required checks; minor and major updates require review.
+- CI runs both installs, 20 mocked tests, lint, build, critical audits and browser smoke.
+- Dependency Review blocks newly introduced high-severity runtime dependencies.
+- CodeQL scans JavaScript through GitHub default setup.
+- Every successful Vercel preview and production deployment runs the same browser smoke tests.
+
+The deployment workflow accepts an optional `VERCEL_AUTOMATION_BYPASS_SECRET`
+repository secret when preview protection is enabled. Keep that value only in
+GitHub and Vercel settings; never add it to a file.
+
 ## Vercel deployment
 
 Vercel builds the Vite frontend. Requests under `/api/*` are rewritten to `api/index.js`; other paths fall back to `index.html`.

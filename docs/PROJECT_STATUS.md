@@ -60,7 +60,9 @@ The deployed demo may remain available while hosting permits, but repository doc
 - Server-configured interactive Octopus credentials are unsafe on an open deployment.
 - Public AI access can spend the owner's API credit.
 - There is no database-backed job ledger, metrics, alerting or incident runbook.
-- Dependency updates and security patches are not scheduled after archive.
+- Weekly dependency updates, critical audit checks, dependency review, CodeQL and
+  deployment smoke tests are enabled. Patch updates may auto-merge only after the
+  protected checks pass; minor and major updates remain review-gated.
 
 ## Verification boundary
 

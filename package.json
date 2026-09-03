@@ -11,6 +11,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "test": "node --test src/lib/*.test.js server/*.test.js",
+    "test:smoke": "playwright test",
+    "test:smoke:local": "npm run build && playwright test",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -24,6 +26,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
